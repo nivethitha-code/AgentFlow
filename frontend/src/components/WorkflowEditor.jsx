@@ -82,6 +82,7 @@ export function WorkflowEditor() {
 
     const handleSaveAndRun = async () => {
         setIsSaving(true);
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
         try {
             // 1. Create Workflow
             const formattedSteps = steps.map((s, index) => ({
@@ -100,7 +101,7 @@ export function WorkflowEditor() {
                 next_steps: s.next_steps.filter(b => b.next_step_id)
             }));
 
-            const response = await fetch('http://localhost:8000/workflows', {
+            const response = await fetch(`${API_URL}/workflows`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, steps: formattedSteps })
@@ -110,7 +111,7 @@ export function WorkflowEditor() {
             const workflow = await response.json();
 
             // 2. Run Workflow
-            const runRes = await fetch(`http://localhost:8000/run/${workflow.id}`, {
+            const runRes = await fetch(`${API_URL}/run/${workflow.id}`, {
                 method: 'POST'
             });
             const run = await runRes.json();

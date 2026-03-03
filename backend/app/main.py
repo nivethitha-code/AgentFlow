@@ -11,13 +11,17 @@ from app.models import WorkflowCreate, Workflow, WorkflowRun, RunStepResult, Ste
 from app.database import supabase
 from app.service import LLMService
 
+import os
+
 # Initialize App
 app = FastAPI(title="Agentic Workflow Builder API")
 
 # CORS
+FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all for hackathon; restrict in prod
+    allow_origins=[FRONTEND_URL, "http://localhost:5173"] if FRONTEND_URL != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

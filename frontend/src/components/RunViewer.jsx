@@ -45,8 +45,10 @@ export function RunViewer() {
         };
     }, [runId]);
 
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
     const fetchRun = async () => {
-        const res = await fetch(`http://localhost:8000/run/${runId}`);
+        const res = await fetch(`${API_URL}/run/${runId}`);
         if (res.ok) {
             const data = await res.json();
             setRun(data);
@@ -58,7 +60,7 @@ export function RunViewer() {
 
         setIsRerunning(true);
         try {
-            const res = await fetch(`http://localhost:8000/run/${run.workflow_id}`, {
+            const res = await fetch(`${API_URL}/run/${run.workflow_id}`, {
                 method: 'POST'
             });
 
@@ -77,7 +79,7 @@ export function RunViewer() {
     const handleRunStep = async (stepId) => {
         setRunningStepId(stepId);
         try {
-            const res = await fetch(`http://localhost:8000/run/${runId}/step/${stepId}`, {
+            const res = await fetch(`${API_URL}/run/${runId}/step/${stepId}`, {
                 method: 'POST'
             });
             if (!res.ok) throw new Error('Failed to run step');
@@ -94,7 +96,7 @@ export function RunViewer() {
     const handleDeleteWorkflow = async () => {
         if (!window.confirm('Delete this workflow and ALL its runs PERMANENTLY? This cannot be undone.')) return;
         try {
-            const res = await fetch(`http://localhost:8000/workflow/${run.workflow_id}`, {
+            const res = await fetch(`${API_URL}/workflow/${run.workflow_id}`, {
                 method: 'DELETE'
             });
             if (res.ok) {

@@ -7,9 +7,11 @@ import { FileClock, ChevronRight, Activity, Trash2 } from 'lucide-react';
 export function History() {
     const [runs, setRuns] = useState([]);
 
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
     const fetchHistory = async () => {
         try {
-            const res = await fetch('http://localhost:8000/history');
+            const res = await fetch(`${API_URL}/history`);
             if (res.ok) {
                 const data = await res.json();
                 setRuns(data);
@@ -30,7 +32,7 @@ export function History() {
         e.stopPropagation();
         if (!window.confirm('Delete this execution run?')) return;
         try {
-            const res = await fetch(`http://localhost:8000/run/${runId}`, {
+            const res = await fetch(`${API_URL}/run/${runId}`, {
                 method: 'DELETE'
             });
             if (res.ok) {
