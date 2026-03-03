@@ -9,6 +9,11 @@ class ModelType(str, Enum):
     MIXTRAL_8X7B = "mixtral-8x7b-32768"
     GEMMA_7B = "gemma-7b-it"
 
+class StepType(str, Enum):
+    TASK = "task"
+    ROUTER = "router"
+    PARALLEL = "parallel"
+
 class StepStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -21,13 +26,21 @@ class CompletionCriteria(BaseModel):
     value: Optional[str] = None
     instruction: Optional[str] = None # For LLM judge
 
+class Branch(BaseModel):
+    condition: str # "DEFAULT" or a specific label
+    next_step_id: Optional[str]
+
 class StepCreate(BaseModel):
+    id: str # Now generated on frontend for graph linking
     name: Optional[str] = None
+    type: StepType = StepType.TASK
     order: int
     prompt_template: str
     model: ModelType
     completion_criteria: CompletionCriteria
     retry_limit: int = 3
+    input_step_id: Optional[str] = None # Explicitly link to a predecessor's output
+    next_steps: List[Branch] = []
 
 class WorkflowCreate(BaseModel):
     name: str
@@ -56,7 +69,6 @@ class WorkflowRun(BaseModel):
     id: str
     workflow_id: str
     status: str # "running", "completed", "failed"
-    current_step_index: int
     steps_results: List[RunStepResult]
     created_at: datetime
     updated_at: datetime

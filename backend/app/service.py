@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 import httpx
 import json
@@ -32,6 +32,10 @@ class LLMService:
             "Content-Type": "application/json"
         }
         
+        if not prompt or not prompt.strip():
+            logger.warning("Attempted to call LLM with empty prompt. Using fallback.")
+            prompt = "No prompt provided. Please acknowledge."
+
         payload = {
             "model": model.value,
             "messages": [
@@ -41,9 +45,14 @@ class LLMService:
             "temperature": 0.7
         }
         
+        logger.info(f"Calling Groq API: Model={model.value}, PromptLength={len(prompt)}")
+        logger.debug(f"Payload: {json.dumps(payload)}")
+        
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(LLM_API_URL, headers=headers, json=payload, timeout=60.0)
+                if response.status_code >= 400:
+                    logger.error(f"Groq Error Body: {response.text}")
                 response.raise_for_status()
                 return response.json()
         except Exception as e:

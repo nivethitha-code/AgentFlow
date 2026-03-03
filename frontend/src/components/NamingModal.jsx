@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sparkles, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -12,6 +12,12 @@ export function NamingModal({ isOpen, onClose }) {
         onClose();
         navigate('/builder', { state: { workflowName: name } });
     };
+
+    useEffect(() => {
+        if (isOpen) {
+            setName('');
+        }
+    }, [isOpen]);
 
     return (
         <AnimatePresence>

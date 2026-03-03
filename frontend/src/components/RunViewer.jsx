@@ -11,7 +11,7 @@ export function RunViewer() {
     const navigate = useNavigate();
     const [run, setRun] = useState(null);
     const [isRerunning, setIsRerunning] = useState(false);
-    const [runningStepIndex, setRunningStepIndex] = useState(null);
+    const [runningStepId, setRunningStepId] = useState(null);
 
     useEffect(() => {
         fetchRun();
@@ -74,10 +74,10 @@ export function RunViewer() {
         }
     };
 
-    const handleRunStep = async (index) => {
-        setRunningStepIndex(index);
+    const handleRunStep = async (stepId) => {
+        setRunningStepId(stepId);
         try {
-            const res = await fetch(`http://localhost:8000/run/${runId}/step/${index}`, {
+            const res = await fetch(`http://localhost:8000/run/${runId}/step/${stepId}`, {
                 method: 'POST'
             });
             if (!res.ok) throw new Error('Failed to run step');
@@ -85,7 +85,7 @@ export function RunViewer() {
             console.error(e);
             alert('Failed to run step');
         } finally {
-            setRunningStepIndex(null);
+            setRunningStepId(null);
         }
     };
 
@@ -117,7 +117,7 @@ export function RunViewer() {
             <div className="flex items-center justify-between gap-4 mb-2">
                 <div className="flex items-center gap-4">
                     <button
-                        onClick={() => navigate(-1)}
+                        onClick={() => navigate('/history')}
                         className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-500"
                         title="Go Back"
                     >
@@ -204,12 +204,12 @@ export function RunViewer() {
                                         {result.step_name || `Step ${index + 1}`}
                                     </h3>
                                     <button
-                                        onClick={() => handleRunStep(index)}
-                                        disabled={runningStepIndex === index}
+                                        onClick={() => handleRunStep(result.step_id)}
+                                        disabled={runningStepId === result.step_id}
                                         className="p-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-500 rounded-md transition-colors disabled:opacity-50"
                                         title="Run this step only"
                                     >
-                                        {runningStepIndex === index ? (
+                                        {runningStepId === result.step_id ? (
                                             <Loader2 size={14} className="animate-spin" />
                                         ) : (
                                             <Play size={14} />

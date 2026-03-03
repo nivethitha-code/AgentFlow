@@ -1,0 +1,18 @@
+Workflow ID: f5c1d210-fc99-4d82-b161-ab8053f0bd5c
+Name: Product Launch
+Step: Manager (router) -> ID: e2151e3d-2f3c-4cb1-bea5-7e33d34b8637
+  Next Steps: [{'condition': 'LAUNCH', 'next_step_id': '5a32dbf0-791e-4e29-8b92-99f35b57a116'}]
+Step: Task Spawner (parallel) -> ID: ebcab2db-faac-4275-a07b-73264f567150
+  Next Steps: [{'condition': '', 'next_step_id': '5a32dbf0-791e-4e29-8b92-99f35b57a116'}, {'condition': '', 'next_step_id': '75e0d235-d613-408b-a042-75cf7fb01dcd'}]
+Step: Twitter Marketer (task) -> ID: 5a32dbf0-791e-4e29-8b92-99f35b57a116
+  Next Steps: []
+Step: Email Copywriter (task) -> ID: 75e0d235-d613-408b-a042-75cf7fb01dcd
+  Next Steps: []
+
+--- Latest Run ---
+Run ID: 354d291a-e886-4fe0-a9f9-a73c60bb61bf
+Status: completed
+  Step ID: e2151e3d-2f3c-4cb1-bea5-7e33d34b8637, Status: completed
+  Output: LAUNCH
+  Step ID: 5a32dbf0-791e-4e29-8b92-99f35b57a116, Status: completed
+  Output: "Get ready to step into the future! Our revolutionary AI-powered shoe, 'SmartStep', is launching now

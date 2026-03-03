@@ -35,7 +35,7 @@ def get_workflow(workflow_id: str) -> Workflow:
     data = response.data[0]
     # Parse definition to steps
     steps_data = data["definition"]
-    steps = [Step(**s, workflow_id=workflow_id, id=str(uuid.uuid4())) for s in steps_data] # Assign temp IDs to steps if needed or use index
+    steps = [Step(**s, workflow_id=workflow_id) for s in steps_data]
     
     return Workflow(
         id=data["id"],
@@ -44,150 +44,250 @@ def get_workflow(workflow_id: str) -> Workflow:
         steps=steps
     )
 
+async def execute_task(run_id: str, step: Step, context: str, results: List[Dict]):
+    """Helper to execute a single task step."""
+    logger.info(f"Executing step {step.name} ({step.id})")
+    
+    step_result = RunStepResult(
+        step_id=step.id,
+        step_name=step.name,
+        status=StepStatus.RUNNING,
+        input_context=context,
+        output=None,
+        error=None
+    )
+    
+    # Update status in DB
+    try:
+        # Find the index of this step in the results list, or append if new
+        step_index = -1
+        for i, res in enumerate(results):
+            if res.get("step_id") == step.id:
+                step_index = i
+                break
+        
+        if step_index != -1:
+            results[step_index] = step_result.model_dump()
+        else:
+            results.append(step_result.model_dump())
+
+        supabase.table("workflow_runs").update({"steps_results": results}).eq("id", run_id).execute()
+    except Exception as e:
+        logger.warning(f"Failed to update step status to running: {e}")
+
+    # Prepare Prompt
+    base_prompt = step.prompt_template.replace("{{context}}", context)
+    if step.completion_criteria.type == "json_valid":
+        base_prompt += "\n\nIMPORTANT: You MUST respond with valid JSON only. Do not include any explanation, markdown, or extra text — only a raw JSON object or array."
+    elif step.completion_criteria.type == "contains" and step.completion_criteria.value:
+        terms = [t.strip() for t in step.completion_criteria.value.split(",") if t.strip()]
+        if terms:
+            base_prompt += f"\n\nIMPORTANT: Your response MUST include the following term(s): {', '.join(terms)}."
+
+    prompt = base_prompt
+    retries = 0
+    success = False
+    final_output = ""
+    last_error = None
+    
+    while retries < step.retry_limit and not success:
+        try:
+            response = await service.call_llm(step.model, prompt)
+            output = response['choices'][0]['message']['content']
+            is_valid = await service.validate_output(output, step.completion_criteria)
+            
+            if is_valid:
+                success = True
+                final_output = output
+            else:
+                retries += 1
+                last_error = f"Criteria '{step.completion_criteria.type}' not met. Output: {output[:100]}..."
+                # Refine prompt for retry with explicit reminder
+                if step.completion_criteria.type == "json_valid":
+                    prompt = base_prompt + f"\n\nPrevious attempt failed — your response was not valid JSON. Try again with ONLY a JSON object or array."
+                else:
+                    prompt = base_prompt + f"\n\nPrevious attempt failed (criteria: {step.completion_criteria.type}). Please try again carefully."
+        except Exception as e:
+            logger.error(f"Step {step.id} error: {e}")
+            last_error = str(e)
+            retries += 1
+    
+    step_result.retries_used = retries
+    if success:
+        step_result.status = StepStatus.COMPLETED
+        step_result.output = final_output
+    else:
+        step_result.status = StepStatus.FAILED
+        step_result.error = f"Failed after {retries} retries. Last error: {last_error}" if last_error else "Max retries reached. Validation criteria not met."
+    
+    # Update final result for this step
+    # Find the index of this step in the results list, or append if new
+    step_index = -1
+    for i, res in enumerate(results):
+        if res.get("step_id") == step.id:
+            step_index = i
+            break
+    
+    if step_index != -1:
+        results[step_index] = step_result.model_dump()
+    else:
+        results.append(step_result.model_dump())
+
+    try:
+        supabase.table("workflow_runs").update({"steps_results": results}).eq("id", run_id).execute()
+    except Exception as e:
+        logger.error(f"Failed to save step result: {e}")
+    
+    return step_result
+
 async def execute_workflow_task(run_id: str, workflow_id: str):
     """
-    Background task to execute the workflow steps sequentially.
+    Background task to execute the workflow graph.
     """
-    logger.info(f"Starting execution for run {run_id}")
+    logger.info(f"Starting GRAPH execution for run {run_id}")
     
-    # 1. Fetch Workflow Definition
     try:
         workflow = get_workflow(workflow_id)
-    except Exception as e:
-        logger.error(f"Failed to fetch workflow: {e}")
-        # Mark run as failed immediately
-        try:
-             supabase.table("workflow_runs").update({
-                "status": "failed",
-                "steps_results": [{"error": f"Failed to initiate workflow: {str(e)}"}]
-            }).eq("id", run_id).execute()
-        except Exception as db_e:
-            logger.error(f"Failed to update run status to failed: {db_e}")
-        return
-
-    # 2. Update Run Status to Running
-    try:
+        # 1. Update Run Status to Running
         supabase.table("workflow_runs").update({"status": "running"}).eq("id", run_id).execute()
-    except Exception as e:
-        logger.error(f"Failed to set status to running: {e}")
-        return
-    
-    context = ""
-    results = []
-    
-    for index, step in enumerate(workflow.steps):
-        # Update current step index
-        try:
-            supabase.table("workflow_runs").update({
-                "current_step_index": index
-            }).eq("id", run_id).execute()
-        except Exception as e:
-            logger.warning(f"Failed to update step index: {e}")
-
-        step_result = RunStepResult(
-            step_id=str(index), # Using index as ID for simplicity in front
-            step_name=step.name,
-            status=StepStatus.RUNNING,
-            input_context=context,
-            output=None,
-            error=None
-        )
-        # Optimistic update of results array (append running step)
-        try:
-            current_results = results + [step_result.model_dump()]
-            supabase.table("workflow_runs").update({"steps_results": current_results}).eq("id", run_id).execute()
-        except Exception as e:
-             logger.warning(f"Failed to update step results (optimistic): {e}")
-
-        # Prepare Prompt
-        base_prompt = step.prompt_template.replace("{{context}}", context)
-
-        # If criteria is json_valid, instruct the LLM explicitly to return JSON
-        if step.completion_criteria.type == "json_valid":
-            base_prompt += "\n\nIMPORTANT: You MUST respond with valid JSON only. Do not include any explanation, markdown, or extra text — only a raw JSON object or array."
-        elif step.completion_criteria.type == "contains" and step.completion_criteria.value:
-            terms = [t.strip() for t in step.completion_criteria.value.split(",") if t.strip()]
-            if terms:
-                base_prompt += f"\n\nIMPORTANT: Your response MUST include the following term(s): {', '.join(terms)}."
-
-        prompt = base_prompt
-        retries = 0
-        success = False
-        final_output = ""
-        last_error = None
         
-        # Step Execution Loop (retry_limit = max number of retries after first attempt)
-        while retries < step.retry_limit and not success:
-            try:
-                # Call LLM
-                response = await service.call_llm(step.model, prompt)
-                output = response['choices'][0]['message']['content']
-                
-                # Check Criteria
-                is_valid = await service.validate_output(output, step.completion_criteria)
-                
-                if is_valid:
-                    success = True
-                    final_output = output
-                else:
-                    retries += 1
-                    last_error = f"Criteria '{step.completion_criteria.type}' not met. Output: {output[:100]}..."
-                    logger.info(f"Step {index} validation failed. Retry {retries}/{step.retry_limit}")
-                    # Refine prompt for retry with explicit reminder
-                    if step.completion_criteria.type == "json_valid":
-                        prompt = base_prompt + f"\n\nPrevious attempt failed — your response was not valid JSON. Try again with ONLY a JSON object or array."
-                    else:
-                        prompt = base_prompt + f"\n\nPrevious attempt failed (criteria: {step.completion_criteria.type}). Please try again carefully."
-
-            except Exception as e:
-                logger.error(f"Step {index} error: {e}")
-                last_error = str(e)
-                retries += 1
-                # Optional: exponential backoff here
+        # Build map for easy lookup
+        steps_map = {s.id: s for s in workflow.steps}
+        # Start with step marked as order 0 (or find root)
+        current_steps = [s for s in workflow.steps if s.order == 0]
         
-        # Step Conclusion
-        step_result.retries_used = retries
-        if success:
-            step_result.status = StepStatus.COMPLETED
-            step_result.output = final_output
-            context = final_output # Update context for next step
-        else:
-            step_result.status = StepStatus.FAILED
-            # Use specific error if available, else generic
-            step_result.error = f"Failed after {retries} retries. Last error: {last_error}" if last_error else "Max retries reached. Validation criteria not met."
-            results.append(step_result.model_dump())
+        # Fetch existing results if any (for re-runs or partial runs)
+        run_res = supabase.table("workflow_runs").select("steps_results").eq("id", run_id).execute()
+        results = run_res.data[0]["steps_results"] if run_res.data and run_res.data[0]["steps_results"] else []
+
+        # Keep track of completed step outputs for context
+        completed_outputs = {}
+        for res in results:
+            if res.get("status") == StepStatus.COMPLETED and res.get("output") is not None:
+                completed_outputs[res["step_id"]] = res["output"]
+
+        last_batch_outputs = [] # Tracks outputs of the immediately preceding batch for merging
+
+        while current_steps:
+            next_queue = []
             
-            # Fail the whole run
-            try:
-                supabase.table("workflow_runs").update({
-                    "status": "failed",
-                    "steps_results": results
-                }).eq("id", run_id).execute()
-            except Exception as e:
-                logger.error(f"Failed to update run status to failed after step error: {e}")
-            return # Stop execution
+            # If multiple current steps, run in parallel!
+            if len(current_steps) > 1:
+                # Parallel Execution Logic
+                tasks = []
+                for s in current_steps:
+                    # For parallel, context is typically from a common ancestor or empty
+                    # For simplicity, we'll use the output of the *last* completed step that is an ancestor
+                    # or an empty string if no relevant context is found.
+                    # A more robust solution would involve explicit context passing or merging.
+                    
+                    # For now, let's assume parallel steps don't strictly depend on each other's immediate output
+                    # and might use a shared initial context or context from a single preceding step.
+                    # If a step has 'input_step_id', use that. Otherwise, use empty.
+                    context_for_parallel_step = ""
+                    if s.input_step_id and s.input_step_id in completed_outputs:
+                        context_for_parallel_step = completed_outputs[s.input_step_id]
+                    
+                    tasks.append(execute_task(run_id, s, context_for_parallel_step, results))
+                
+                step_results = await asyncio.gather(*tasks)
+                
+                last_batch_outputs = []
+                
+                # Determine next steps for each
+                for i, s_res in enumerate(step_results):
+                    if s_res.status == StepStatus.COMPLETED:
+                        completed_outputs[s_res.step_id] = s_res.output # Store output for future context
+                        last_batch_outputs.append((s_res.step_id, s_res.output))
+                        step_obj = current_steps[i]
+                        for branch in step_obj.next_steps:
+                             if branch.next_step_id and steps_map[branch.next_step_id] not in next_queue:
+                                 next_queue.append(steps_map[branch.next_step_id])
+                    else:
+                        # A parallel step failed, fail the whole workflow
+                        supabase.table("workflow_runs").update({"status": "failed"}).eq("id", run_id).execute()
+                        logger.error(f"Workflow {workflow_id} run {run_id} failed due to parallel step {s_res.step_id} failure.")
+                        return
+            else: # Single step execution
+                s = current_steps[0]
+                
+                # Determine context for the current step
+                context_for_step = ""
+                if s.input_step_id and s.input_step_id in completed_outputs:
+                    context_for_step = completed_outputs[s.input_step_id]
+                elif len(last_batch_outputs) > 1:
+                    # Merge contexts from parallel steps automatically
+                    merged = []
+                    for idx, (out_id, out_text) in enumerate(last_batch_outputs):
+                        # Use step name if available for clearer context
+                        step_name = steps_map[out_id].name if out_id in steps_map else out_id
+                        merged.append(f"--- Output from Parallel Task '{step_name}' ---\n{out_text}")
+                    context_for_step = "\n\n".join(merged)
+                elif last_batch_outputs and last_batch_outputs[0][1]:
+                    context_for_step = last_batch_outputs[0][1]
+                elif results: # Fallback to last completed step's output if no specific input_step_id
+                    for res in reversed(results):
+                        if res.get("status") == StepStatus.COMPLETED and res.get("output") is not None:
+                            context_for_step = res["output"]
+                            break
+                
+                res = await execute_task(run_id, s, context_for_step, results)
+                
+                last_batch_outputs = []
+                if res.status == StepStatus.COMPLETED:
+                    completed_outputs[res.step_id] = res.output # Store output for future context
+                    last_batch_outputs.append((res.step_id, res.output))
+                    # Branching / Routing Logic
+                    if s.type == "router":
+                        # Match res.output against branch labels
+                        label = res.output.strip().upper()
+                        next_id = None
+                        for branch in s.next_steps:
+                            if branch.condition and branch.condition.upper() in label:
+                                next_id = branch.next_step_id
+                                break
+                        # Fallback to DEFAULT branch if label not found
+                        if not next_id:
+                            for branch in s.next_steps:
+                                if branch.condition == "DEFAULT":
+                                    next_id = branch.next_step_id
+                                    break
+                        
+                        if next_id and steps_map[next_id] not in next_queue:
+                            next_queue.append(steps_map[next_id])
+                    else:
+                        # Standard task, follow all next steps (could be one or more for parallel spawn)
+                        for branch in s.next_steps:
+                            if branch.next_step_id and steps_map[branch.next_step_id] not in next_queue:
+                                next_queue.append(steps_map[branch.next_step_id])
+                else:
+                    # Step failed, stop workflow
+                    supabase.table("workflow_runs").update({"status": "failed"}).eq("id", run_id).execute()
+                    logger.error(f"Workflow {workflow_id} run {run_id} failed due to step {s.id} failure.")
+                    return
 
-        results.append(step_result.model_dump())
-        # Update run with latest completed step
-        try:
-            supabase.table("workflow_runs").update({"steps_results": results}).eq("id", run_id).execute()
-        except Exception as e:
-             logger.error(f"Failed to save step completion: {e}")
+            current_steps = next_queue
 
-    # Workflow Completed
-    try:
-        supabase.table("workflow_runs").update({"status": "completed"}).eq("id", run_id).execute()
+        # Workflow Completed
+        supabase.table("workflow_runs").update({
+            "status": "completed"
+        }).eq("id", run_id).execute()
         logger.info(f"Run {run_id} completed successfully")
+        
     except Exception as e:
-        logger.error(f"Failed to mark run as completed: {e}")
+        logger.error(f"Workflow execution failed for run {run_id}: {e}")
+        try:
+            supabase.table("workflow_runs").update({"status": "failed"}).eq("id", run_id).execute()
+        except Exception as db_e:
+            logger.error(f"Failed to update run status to failed after workflow error: {db_e}")
 
 
 
-async def execute_step_task(run_id: str, step_index: int):
+async def execute_step_task(run_id: str, step_id: str):
     """
     Background task to execute a single workflow step.
     """
-    logger.info(f"Re-running step {step_index} for run {run_id}")
+    logger.info(f"Re-running step {step_id} for run {run_id}")
     
     try:
         # 1. Fetch Run and Workflow
@@ -199,87 +299,25 @@ async def execute_step_task(run_id: str, step_index: int):
         results = run_data["steps_results"]
         
         workflow = get_workflow(workflow_id)
-        if step_index >= len(workflow.steps):
+        steps_map = {s.id: s for s in workflow.steps}
+        if step_id not in steps_map:
             return
             
-        step = workflow.steps[step_index]
+        step = steps_map[step_id]
         
-        # 2. Get context from previous step
+        # 2. Get context from previous step (optimistic fallback or input_step_id)
         context = ""
-        if step_index > 0:
-            if step_index - 1 < len(results):
-                context = results[step_index - 1].get("output", "")
+        if step.input_step_id:
+             for res in results:
+                 if res.get("step_id") == step.input_step_id:
+                     context = res.get("output", "")
+                     break
         
-        # 3. Update step status to running
-        step_result = RunStepResult(
-            step_id=str(step_index),
-            step_name=step.name,
-            status=StepStatus.RUNNING,
-            input_context=context,
-            output=None,
-            error=None
-        )
+        # 3. Call execute_task
+        await execute_task(run_id, step, context, results)
         
-        # Update results array at specific index
-        if step_index < len(results):
-            results[step_index] = step_result.model_dump()
-        else:
-            # Should not happen if history is consistent, but handle anyway
-            while len(results) < step_index:
-                results.append({"status": "pending"})
-            results.append(step_result.model_dump())
-            
-        supabase.table("workflow_runs").update({"steps_results": results}).eq("id", run_id).execute()
-
-        # 4. Prepare Prompt
-        base_prompt = step.prompt_template.replace("{{context}}", context)
-        if step.completion_criteria.type == "json_valid":
-            base_prompt += "\n\nIMPORTANT: You MUST respond with valid JSON only. Do not include any explanation, markdown, or extra text — only a raw JSON object or array."
-        elif step.completion_criteria.type == "contains" and step.completion_criteria.value:
-            terms = [t.strip() for t in step.completion_criteria.value.split(",") if t.strip()]
-            if terms:
-                base_prompt += f"\n\nIMPORTANT: Your response MUST include the following term(s): {', '.join(terms)}."
-
-        prompt = base_prompt
-        retries = 0
-        success = False
-        final_output = ""
-        last_error = None
-        
-        # Step Execution Loop
-        while retries < step.retry_limit and not success:
-            try:
-                response = await service.call_llm(step.model, prompt)
-                output = response['choices'][0]['message']['content']
-                is_valid = await service.validate_output(output, step.completion_criteria)
-                
-                if is_valid:
-                    success = True
-                    final_output = output
-                else:
-                    retries += 1
-                    last_error = f"Criteria '{step.completion_criteria.type}' not met."
-                    if step.completion_criteria.type == "json_valid":
-                        prompt = base_prompt + f"\n\nPrevious attempt failed — your response was not valid JSON. Try again with ONLY a JSON object or array."
-                    else:
-                        prompt = base_prompt + f"\n\nPrevious attempt failed. Please try again carefully."
-            except Exception as e:
-                logger.error(f"Step {step_index} retry {retries} error: {e}")
-                last_error = str(e)
-                retries += 1
-        
-        # 5. Step Conclusion
-        step_result.retries_used = retries
-        if success:
-            step_result.status = StepStatus.COMPLETED
-            step_result.output = final_output
-        else:
-            step_result.status = StepStatus.FAILED
-            step_result.error = f"Failed after {retries} retries. Last error: {last_error}"
-            
-        results[step_index] = step_result.model_dump()
-        
-        # Determine overall run status
+        # 4. Determine overall run status
+        # (This is simplified; a full graph status check would be more complex)
         all_completed = all(r.get("status") == "completed" for r in results)
         any_failed = any(r.get("status") == "failed" for r in results)
         
@@ -290,9 +328,11 @@ async def execute_step_task(run_id: str, step_index: int):
             new_status = "failed"
         
         supabase.table("workflow_runs").update({
-            "steps_results": results,
             "status": new_status
         }).eq("id", run_id).execute()
+        
+    except Exception as e:
+        logger.error(f"Error in execute_step_task: {e}")
         
     except Exception as e:
         logger.error(f"Error in execute_step_task: {e}")
@@ -332,7 +372,6 @@ async def run_workflow(workflow_id: str, background_tasks: BackgroundTasks):
         run_data = {
             "workflow_id": workflow_id,
             "status": "pending",
-            "current_step_index": 0,
             "steps_results": []
         }
         response = supabase.table("workflow_runs").insert(run_data).execute()
@@ -394,12 +433,12 @@ async def delete_workflow(workflow_id: str):
         logger.error(f"Error deleting workflow: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete workflow: {str(e)}")
 
-@app.post("/run/{run_id}/step/{step_index}")
-async def run_single_step(run_id: str, step_index: int, background_tasks: BackgroundTasks):
+@app.post("/run/{run_id}/step/{step_id}")
+async def run_single_step(run_id: str, step_id: str, background_tasks: BackgroundTasks):
     """Trigger a single step execution."""
     try:
-        background_tasks.add_task(execute_step_task, run_id, step_index)
-        return {"status": "queued", "step_index": step_index}
+        background_tasks.add_task(execute_step_task, run_id, step_id)
+        return {"status": "queued", "step_id": step_id}
     except Exception as e:
         logger.error(f"Error starting single step run: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to start step run: {str(e)}")

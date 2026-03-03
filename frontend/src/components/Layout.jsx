@@ -102,9 +102,16 @@ export function Layout({ children }) {
                 <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-3xl pointer-events-none translate-y-1/2 -translate-x-1/2" />
 
                 {/* Top Bar */}
-                <header className="h-16 flex items-center justify-between px-8 z-10">
+                <header className="h-16 flex items-center justify-between px-8 z-10 pt-4">
                     <div className="flex items-center gap-4">
-                        {/* Breadcrumbs or Page Title could go here */}
+                        <motion.div
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                        >
+                            <Zap size={14} fill="currentColor" />
+                            <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider">Next-Gen Automation</span>
+                        </motion.div>
                     </div>
 
                     <div className="flex items-center gap-6">

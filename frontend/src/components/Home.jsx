@@ -9,23 +9,14 @@ export function Home() {
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     return (
-        <div className="max-w-6xl mx-auto pt-4 pb-12 px-4">
+        <div className="max-w-6xl mx-auto pt-0 pb-12 px-4">
             <NamingModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
             />
 
             {/* Hero Section */}
-            <div className="text-center space-y-6 mb-12">
-                <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 mb-4"
-                >
-                    <Zap size={16} fill="currentColor" />
-                    <span className="text-sm font-semibold uppercase tracking-wider">Next-Gen Automation</span>
-                </motion.div>
-
+            <div className="text-center space-y-4 mb-10 mt-8">
                 <motion.h1
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}

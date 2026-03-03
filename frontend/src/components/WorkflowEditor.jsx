@@ -14,7 +14,15 @@ export function WorkflowEditor() {
     const location = useLocation();
     const [name, setName] = useState('New Workflow');
     const [steps, setSteps] = useState([
-        { id: 1, name: '', model: 'llama-3.1-8b-instant', prompt: '', criteria: { type: 'contains', value: '' } }
+        {
+            id: crypto.randomUUID(),
+            name: '',
+            type: 'task',
+            model: 'llama-3.1-8b-instant',
+            prompt: '',
+            criteria: { type: 'contains', value: '' },
+            next_steps: []
+        }
     ]);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -27,7 +35,15 @@ export function WorkflowEditor() {
     const addStep = () => {
         setSteps([
             ...steps,
-            { id: Date.now(), name: '', model: 'llama-3.1-8b-instant', prompt: '', criteria: { type: 'contains', value: '' } }
+            {
+                id: crypto.randomUUID(),
+                name: '',
+                type: 'task',
+                model: 'llama-3.1-8b-instant',
+                prompt: '',
+                criteria: { type: 'contains', value: '' },
+                next_steps: []
+            }
         ]);
     };
 
@@ -43,12 +59,35 @@ export function WorkflowEditor() {
         setSteps(steps.map(s => s.id === id ? { ...s, criteria: { ...s.criteria, [field]: value } } : s));
     };
 
+    const addBranch = (stepId) => {
+        setSteps(steps.map(s => s.id === stepId ? {
+            ...s,
+            next_steps: [...s.next_steps, { condition: '', next_step_id: '' }]
+        } : s));
+    };
+
+    const updateBranch = (stepId, index, field, value) => {
+        setSteps(steps.map(s => s.id === stepId ? {
+            ...s,
+            next_steps: s.next_steps.map((b, i) => i === index ? { ...b, [field]: value } : b)
+        } : s));
+    };
+
+    const removeBranch = (stepId, index) => {
+        setSteps(steps.map(s => s.id === stepId ? {
+            ...s,
+            next_steps: s.next_steps.filter((_, i) => i !== index)
+        } : s));
+    };
+
     const handleSaveAndRun = async () => {
         setIsSaving(true);
         try {
             // 1. Create Workflow
             const formattedSteps = steps.map((s, index) => ({
+                id: s.id,
                 name: s.name || `Step ${index + 1}`,
+                type: s.type,
                 order: index,
                 prompt_template: s.prompt,
                 model: s.model,
@@ -57,7 +96,8 @@ export function WorkflowEditor() {
                     type: s.criteria.type,
                     value: s.criteria.value,
                     instruction: s.criteria.type === 'llm_judge' ? s.criteria.value : undefined
-                }
+                },
+                next_steps: s.next_steps.filter(b => b.next_step_id)
             }));
 
             const response = await fetch('http://localhost:8000/workflows', {
@@ -76,7 +116,12 @@ export function WorkflowEditor() {
             const run = await runRes.json();
 
             // 3. Navigate to Run View
-            navigate(`/run/${run.run_id}`);
+            if (run && run.run_id) {
+                navigate(`/run/${run.run_id}`);
+            } else {
+                console.error('Invalid run response:', run);
+                alert('Success, but failed to navigate to run view.');
+            }
         } catch (e) {
             console.error(e);
             alert('Error saving workflow');
@@ -159,16 +204,72 @@ export function WorkflowEditor() {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-50 dark:border-gray-800/50">
                                     <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-500 mb-2 px-1">Model Selection</label>
-                                            <select
-                                                value={step.model}
-                                                onChange={(e) => updateStep(step.id, 'model', e.target.value)}
-                                                className="w-full bg-gray-50 dark:bg-gray-800 border border-transparent focus:border-blue-500/50 rounded-xl p-3 text-sm focus:ring-0 transition-all outline-none"
-                                            >
-                                                {MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                            </select>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-500 mb-2 px-1">Step Type</label>
+                                                <select
+                                                    value={step.type}
+                                                    onChange={(e) => updateStep(step.id, 'type', e.target.value)}
+                                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-transparent focus:border-blue-500/50 rounded-xl p-3 text-sm focus:ring-0 transition-all outline-none"
+                                                >
+                                                    <option value="task">Normal Task (Sequential)</option>
+                                                    <option value="router">Router / Manager (Condition-based)</option>
+                                                    <option value="parallel">Parallel Spawner (Run Multiple)</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-500 mb-2 px-1">Model</label>
+                                                <select
+                                                    value={step.model}
+                                                    onChange={(e) => updateStep(step.id, 'model', e.target.value)}
+                                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-transparent focus:border-blue-500/50 rounded-xl p-3 text-sm focus:ring-0 transition-all outline-none"
+                                                >
+                                                    {MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                                </select>
+                                            </div>
                                         </div>
+                                        {(step.type === 'router' || step.type === 'parallel') && (
+                                            <div className="p-4 rounded-xl bg-purple-500/5 border border-purple-500/10 space-y-3">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-xs font-bold text-purple-500 uppercase tracking-widest">{step.type === 'router' ? 'Decision Branches' : 'Parallel Tasks'}</label>
+                                                    <button onClick={() => addBranch(step.id)} className="text-xs text-blue-500 hover:underline">{step.type === 'router' ? 'Add Branch' : 'Add Task'}</button>
+                                                </div>
+                                                {step.next_steps.map((branch, bi) => (
+                                                    <div key={bi} className="flex gap-2 items-center">
+                                                        {step.type === 'router' && (
+                                                            <>
+                                                                <input
+                                                                    placeholder="Label (e.g. TECHNICAL)"
+                                                                    value={branch.condition}
+                                                                    onChange={(e) => updateBranch(step.id, bi, 'condition', e.target.value)}
+                                                                    className="flex-1 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-2 rounded text-xs"
+                                                                />
+                                                                <ArrowLeft size={14} className="rotate-180 text-gray-300" />
+                                                            </>
+                                                        )}
+                                                        <select
+                                                            value={branch.next_step_id}
+                                                            onChange={(e) => updateBranch(step.id, bi, 'next_step_id', e.target.value)}
+                                                            className="flex-1 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-2 rounded text-xs"
+                                                        >
+                                                            <option value="">Link to step...</option>
+                                                            {steps.filter(s => s.id !== step.id).map(s => (
+                                                                <option key={s.id} value={s.id}>{s.name || `Step ${steps.indexOf(s) + 1}`}</option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            onClick={() => removeBranch(step.id, bi)}
+                                                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                                                            title="Delete this branch"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                {step.type === 'router' && <p className="text-[10px] text-gray-400">Label 'DEFAULT' acts as fallback.</p>}
+                                                {step.type === 'parallel' && <p className="text-[10px] text-gray-400">All linked steps will execute at the same time.</p>}
+                                            </div>
+                                        )}
                                         <div>
                                             <label className="block text-sm font-medium text-gray-500 mb-2 px-1">Prompt Template</label>
                                             <textarea
