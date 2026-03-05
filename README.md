@@ -12,8 +12,6 @@
 |------|-----------------|----------------|
 | ![Home](screenshots/home.png) | ![Builder](screenshots/builder.png) | ![Execution](screenshots/execution.png) |
 
-> 📁 Add your screenshots to a `screenshots/` folder in the repo root.
-
 ---
 
 ## 🧱 Tech Stack
