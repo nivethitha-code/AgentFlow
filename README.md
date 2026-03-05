@@ -6,7 +6,7 @@
 
 ## 🔗 Live Demo & Screenshots
 
-🌐 **Deployed App:** [agent-flow-pi.vercel.app](https://agent-flow-pi.vercel.app)
+🌐 **Deployed App:** [agent-flow.vercel.app](https://agent-flow-blush.vercel.app)
 
 | Home | Workflow Builder | Execution View |
 |------|-----------------|----------------|
