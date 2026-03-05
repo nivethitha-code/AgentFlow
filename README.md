@@ -8,9 +8,9 @@
 
 🌐 **Deployed App:** [agent-flow.vercel.app](https://agent-flow-blush.vercel.app)
 
-| Home | Workflow Builder | Execution View |
-|------|-----------------|----------------|
-| ![Home](screenshots/home.png) | ![Builder](screenshots/builder.png) | ![Execution](screenshots/execution.png) |
+| Home | Workflow Builder | Execution View | History |
+|-----------------|-----------------|----------------|----------------|
+| <img width="1297" height="610" alt="image" src="https://github.com/user-attachments/assets/9e1e38e6-18ac-4ae9-8fc5-6d7e5b7379d5" /> | <img width="1297" height="610" alt="image" src="https://github.com/user-attachments/assets/02c763e6-c0fc-43fa-89bc-e177330ee82d" />   <img width="1297" height="610" alt="image" src="https://github.com/user-attachments/assets/878e0be4-06a1-4a07-91ef-71823c3d183a" />    | <img width="1297" height="610" alt="image" src="https://github.com/user-attachments/assets/3c440596-4ec5-4692-869d-62d742b1002f" /> | <img width="1297" height="610" alt="image" src="https://github.com/user-attachments/assets/cd53671e-49fb-42c6-8a16-9c5b8597a0e5" /> |
 
 ---
 
